@@ -5,6 +5,12 @@ import os
 import io
 import botocore
 from pathlib import Path
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO
+                    , format='%(asctime)s - %(levelname)s - %(message)s'
+                    , filename='Aws_pipeline.log')
 
 # Load environment variables from .env file
 load_dotenv()
@@ -16,6 +22,7 @@ s3_client = boto3.client(
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
     region_name=os.getenv('AWS_DEFAULT_REGION')
 )
+logging.info("S3 client initialized successfully.")
 
 # Define Medallion Architecture layers and their corresponding S3 buckets
 LAYERS = {
@@ -27,15 +34,15 @@ LAYERS = {
 # Use dynamic base path to support any installation environment
 BASE_DIR = Path(__file__).parent
 local_folder = BASE_DIR / "Data"
-
+logging.info(f"Local data folder set to: {local_folder}")
 # Create S3 buckets only if they don't already exist
 for layer, bucket in LAYERS.items():
     try:
         s3_client.head_bucket(Bucket=bucket)
-        print(f"⚠️  [{layer.upper()}] Already exists: {bucket}")
+        logging.info(f"⚠️  [{layer.upper()}] Already exists: {bucket}")
     except botocore.exceptions.ClientError:
         s3_client.create_bucket(Bucket=bucket)
-        print(f"✅ [{layer.upper()}] Created: {bucket}")
+        logging.info(f"✅ [{layer.upper()}] Created: {bucket}")
 
 
 def upload_to_bronze():
@@ -49,11 +56,11 @@ def upload_to_bronze():
             try:
                 # Check if file already exists in Bronze
                 s3_client.head_object(Bucket=LAYERS['bronze'], Key=f'raw/{file_name}')
-                print(f"⚠️  {file_name} already in Bronze, skipping...")
+                logging.info(f"⚠️  Skipped (exists): {file_name}")
             except botocore.exceptions.ClientError:
                 # Upload file if it doesn't exist
                 s3_client.upload_file(str(local_path), LAYERS['bronze'], f'raw/{file_name}')
-                print(f"📤 Uploaded: {file_name}")
+                logging.info(f"📤 Uploaded: {file_name}")
 
 
 def transform_bronze_to_silver():
@@ -95,8 +102,8 @@ def transform_bronze_to_silver():
         Key='cleaned/SalesData.csv',
         Body=buffer.getvalue()
     )
-    print(f"📊 Bronze: {len(bronze_df)} rows")
-    print(f"✨ Silver: {len(silver_df)} clean rows")
+    logging.info(f"📊 Bronze: {len(bronze_df)} rows")
+    logging.info(f"✨ Silver: {len(silver_df)} clean rows")
     return silver_df
 
 
@@ -118,7 +125,7 @@ def transform_silver_to_gold():
         Avg_Revenue   = ('Weighted Revenue', 'mean'),
         Closed_Deals  = ('Closed Opportunity', 'sum')
     ).reset_index()
-
+    
     # Round average revenue to 2 decimal places
     gold_df['Avg_Revenue'] = gold_df['Avg_Revenue'].round(2)
 
@@ -130,7 +137,7 @@ def transform_silver_to_gold():
         Key='aggregated/SalesData.csv',
         Body=buffer.getvalue()
     )
-    print(f"🏆 Gold: {len(gold_df)} aggregated rows")
+    logging.info(f"🏆 Gold: {len(gold_df)} aggregated rows")
     return gold_df
 
 
@@ -138,4 +145,4 @@ if __name__ == "__main__":
     upload_to_bronze()
     transform_bronze_to_silver()
     transform_silver_to_gold()
-    print("🚀 Pipeline completed successfully!")
+    logging.info("🚀 Pipeline completed successfully!")
